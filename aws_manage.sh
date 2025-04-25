@@ -79,6 +79,7 @@ function main_menu {
     echo -e "${RED}7. Check EBS Volumes${NC}"
     echo -e "${RED}8. Domain Management${NC}"
     echo -e "${RED}9. Exit${NC}"
+    echo -e "${RED}10. Manage IAM Users${NC}"
     read -p "Enter your choice: " choice
 
     case $choice in
@@ -90,6 +91,7 @@ function main_menu {
         6) devops_features ;;
         7) check_volumes ;;
         8) domain_management ;;
+        10) manage_iam_users ;;
         9) 
             matrix_effect &
             goodbye_message
@@ -343,6 +345,67 @@ EOF
     spinning
     echo -e "${GREEN}DNS record deleted successfully.${NC}"
     pause
+}
+
+function manage_iam_users {
+    echo -e "${GREEN}Fetching IAM users...${NC}"
+    mapfile -t iam_users < <(aws iam list-users --query "Users[*].UserName" --output text | tr '\t' '\n')
+
+    if [ ${#iam_users[@]} -eq 0 ]; then
+        echo -e "${RED}No IAM users found.${NC}"
+        pause
+        return
+    fi
+
+    echo -e "${YELLOW}Select a user to manage:${NC}"
+    select selected_user in "${iam_users[@]}" "Quit"; do
+        if [[ "$selected_user" == "Quit" ]]; then
+            echo "Returning to main menu..."
+            break
+        elif [[ -n "$selected_user" ]]; then
+            echo -e "${GREEN}Selected user: $selected_user${NC}"
+            echo -e "${YELLOW}Choose an action for $selected_user:${NC}"
+            echo "1) View User Info"
+            echo "2) Reset Password"
+            echo "3) Cancel"
+            read -p "Enter choice: " action_choice
+
+            case $action_choice in
+                1)
+                    echo -e "${GREEN}Gathering user information and access activity...${NC}"
+                    aws iam get-user --user-name "$selected_user"
+                    echo -e "\n${GREEN}Login Profile:${NC}"
+                    aws iam get-login-profile --user-name "$selected_user" 2>/dev/null || echo -e "${YELLOW}No login profile found.${NC}"
+                    echo -e "\n${GREEN}Access Keys:${NC}"
+                    aws iam list-access-keys --user-name "$selected_user" --output table
+                    echo -e "\n${GREEN}Last Used Access Key Details:${NC}"
+                    aws iam get-access-key-last-used --access-key-id $(aws iam list-access-keys --user-name "$selected_user" --query "AccessKeyMetadata[0].AccessKeyId" --output text) 2>/dev/null || echo -e "${YELLOW}No access key activity found.${NC}"
+                    pause
+                    ;;
+                2)
+                    read -s -p "Enter new password for $selected_user: " new_password
+                    echo
+                    echo -e "${GREEN}Updating login profile...${NC}"
+                    aws iam update-login-profile \
+                        --user-name "$selected_user" \
+                        --password "$new_password" \
+                        --password-reset-required && \
+                        echo -e "${GREEN}Password updated successfully for $selected_user.${NC}" || \
+                        echo -e "${RED}Failed to update password for $selected_user.${NC}"
+                    pause
+                    ;;
+                3)
+                    echo "Action cancelled."
+                    ;;
+                *)
+                    echo -e "${RED}Invalid action choice. Returning...${NC}"
+                    ;;
+            esac
+            break
+        else
+            echo -e "${RED}Invalid selection. Try again.${NC}"
+        fi
+    done
 }
 
 function pause {
